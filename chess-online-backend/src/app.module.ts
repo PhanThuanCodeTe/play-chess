@@ -14,9 +14,8 @@ import { UsersModule } from './users/users.module';
       password: 'Admin@123',
       username: 'postgres',
       entities: [],
+      autoLoadEntities: true,
       database: 'chessonline',
-      synchronize: true,
-      logging: true,
     }),
     UsersModule
   ],
