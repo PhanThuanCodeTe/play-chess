@@ -31,7 +31,7 @@ Tạo ra 1 hệ thống để người chơi có thể chơi cờ vua cross-plat
     - Chức năng custom Profile: Thay avatar, Viền avatar (Viền avatar sẽ có khi đạt thành tựu hay lên rank trên Rookie), Thay Background, Thay tên người chơi, Thay slogan.
     - Tích hợp thêm AI chơi với người chơi.
 ## 3. Định hướng thực hiện
-- Frontend: NextJS + MUI + TailwindCSS.
+- Frontend: NextJS + MUI + TailwindCSS, chessjs cho quy tắc của các con cờ.
 - Backend: NestJS + Socket.io + TypeORM.
 - Database: Firebase.
 ## 4. Dự kiến
