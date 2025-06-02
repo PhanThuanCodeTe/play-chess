@@ -4,6 +4,8 @@ import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { UsersModule } from './users/users.module';
+import { getDatabaseConfig } from './common/configs/database.config';
+import { CloudinaryService } from './common/services/cloudinary.service';
 
 @Module({
   imports: [
@@ -12,21 +14,13 @@ import { UsersModule } from './users/users.module';
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: 'localhost',
-        port: 5432,
-        username: configService.get('DATABASE_USERNAME'),
-        password: configService.get('DATABASE_PASSWORD'),
-        database: configService.get('DATABASE_NAME'),
-        entities: [],
-        autoLoadEntities: true,
-      }),
+      useFactory: getDatabaseConfig,
       inject: [ConfigService],
     }),
     UsersModule
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, CloudinaryService],
+  exports: [CloudinaryService],
 })
 export class AppModule {}
