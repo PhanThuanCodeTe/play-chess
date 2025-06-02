@@ -1,66 +1,55 @@
-import { Controller, Post, Body, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { Controller, Post, Put, Patch, Body, UseInterceptors, UploadedFiles, Param, BadRequestException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto, UpdateUserCoinDto, UpdateUserRankDto } from './dto/update-user.dto';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
 
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post('register')
-  // @UseInterceptors(
-  //   FilesInterceptor('files', 3, { // Giới hạn tối đa 3 file
-  //     storage: diskStorage({
-  //       destination: './uploads', // Thư mục lưu file
-  //       filename: (req, file, callback) => {
-  //         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-  //         const ext = extname(file.originalname);
-  //         callback(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
-  //       },
-  //     }),
-  //     fileFilter: (req, file, callback) => {
-  //       // Chỉ cho phép file hình ảnh (jpg, jpeg, png, gif)
-  //       if (!file.originalname.match(/\.(jpg|jpeg|png|gif)$/)) {
-  //         return callback(new Error('Chỉ cho phép file hình ảnh!'), false);
-  //       }
-  //       callback(null, true);
-  //     },
-  //     limits: {
-  //       fileSize: 1024 * 1024 * 5, // Giới hạn 5MB mỗi file
-  //     },
-  //   }),
-  // )
-  // uploadFiles(
-  //   @UploadedFiles() files: Express.Multer.File[],
-  //   @Body() body: any,
-  // ) {
-  //   // Xử lý các file
-  //   const fileResponse = files.map(file => ({
-  //     field: file.fieldname,
-  //     originalname: file.originalname,
-  //     filename: file.filename,
-  //     path: file.path,
-  //   }));
-
-  //   // Xử lý các trường text
-  //   const textData = {
-  //     email: body.email,
-  //     password: body.password,
-  //     name: body.name,
-  //     slogan: body.slogan,
-  //   };
-
-  //   return {
-  //     message: 'Dữ liệu đã được nhận thành công',
-  //     files: fileResponse,
-  //     textData: textData,
-  //   };
-  // }
-
   create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.createUser(createUserDto);
+  }
+
+  @Put(':id/profile')
+  @UseInterceptors(
+    FilesInterceptor('images', 3, {
+      fileFilter: (req, file, callback) => {
+        if (!file.originalname.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+          return callback(new BadRequestException('Chỉ cho phép file hình ảnh!'), false);
+        }
+        callback(null, true);
+      },
+      limits: {
+        fileSize: 1024 * 1024 * 5, // 5MB
+        files: 3, // Tối đa 3 file
+      },
+    }),
+  )
+  async updateProfile(
+    @Param('id') id: string,
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
+    return this.usersService.updateUserProfile(id, updateUserDto, files);
+  }
+
+  @Patch(':id/coin')
+  updateCoin(
+    @Param('id') id: string,
+    @Body() updateCoinDto: UpdateUserCoinDto,
+  ) {
+    return this.usersService.updateUserCoin(id, updateCoinDto.coin);
+  }
+
+  @Patch(':id/rank')
+  updateRank(
+    @Param('id') id: string,
+    @Body() updateRankDto: UpdateUserRankDto,
+  ) {
+    return this.usersService.updateUserRank(id, updateRankDto.rank_point);
   }
 
 }
