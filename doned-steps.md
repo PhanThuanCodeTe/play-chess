@@ -31,6 +31,18 @@ Vì vậy nên tôi phải thêm 1 file .env để chứa các thông tin cần 
 
 Mà sau này tôi cũng cần có nhiều loại config hay kết nối khác nữa nên tôi nghĩ mình nên tạo ra 1 folder config và đặt tất cả các file config vào đó.
 
+### 4. Thêm JWT cho project
+1. Cài đặt cái gói cần thiết
+> npm install @nestjs/jwt @nestjs/passport passport passport-jwt passport-local
+> npm install -D @types/passport-jwt @types/passport-local
+> nest g module auth -> lười biếng
+> nest g controller auth -> lười biếng
+> nest g service auth -> lười biếng
+
+Nên tự tay tạo ra từng file một rồi cập nhật app.module nhé. Đừng như tôi :<
+
+
+
 
 
 

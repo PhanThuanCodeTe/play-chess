@@ -17,23 +17,23 @@ import {
 @Injectable()
 export class UsersService {
 
-  constructor( // constructor
+  constructor(
     @InjectRepository(User)
-    private readonly userRepository: Repository<User>, // inject user repository
-    private readonly cloudinaryService: CloudinaryService, // inject cloudinary service
+    private readonly userRepository: Repository<User>,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
 
-  async createUser(createUserDto: CreateUserDto): Promise<ApiResponse> { // create user method
+  async createUser(createUserDto: CreateUserDto): Promise<ApiResponse> {
     const { email, password, name, slogan } = createUserDto; 
 
-    const existingUser = await this.userRepository.findOne({ where: { email } }); // check mail if it exist res back
+    const existingUser = await this.userRepository.findOne({ where: { email } });
     if (existingUser) {
       return api()
         .setError('Email already exists')
         .build();
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10); // hash the password to new variable
+    const hashedPassword = await bcrypt.hash(password, 10);
     // Generate random images
     const avatar_url = generateRandomAvatar();
     const avatar_frame = generateRandomFrame();
@@ -54,16 +54,53 @@ export class UsersService {
     const newUser = await this.userRepository.save(user);
 
     const responseRegisteredUser = {
+      id: newUser.id,
+      email: newUser.email,
       name: newUser.name,
       avatar_url: newUser.avatar_url,
       background_image: newUser.background_image,
       avatar_frame: newUser.avatar_frame,
-      slogan: newUser.slogan
-    }; // return exact column not all
+      slogan: newUser.slogan,
+      rank_point: newUser.rank_point,
+      rank_name: newUser.rank_name,
+    };
 
-    return api() // api respone
+    return api()
       .setMessage('User created successfully')
       .setResponse(responseRegisteredUser)
+      .build();
+  }
+
+  async getUserProfile(id: string): Promise<ApiResponse> {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) {
+      return api()
+        .setError('User not found')
+        .build();
+    }
+
+    const userProfile = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      slogan: user.slogan,
+      avatar_url: user.avatar_url,
+      avatar_frame: user.avatar_frame,
+      background_image: user.background_image,
+      rank_point: user.rank_point,
+      rank_name: user.rank_name,
+      total_game: user.total_game,
+      win_match: user.win_match,
+      win_rate: user.win_rate,
+      coin: user.coin,
+      status: user.status,
+      last_active: user.last_active,
+      created_at: user.created_at,
+    };
+
+    return api()
+      .setMessage('User profile retrieved successfully')
+      .setResponse(userProfile)
       .build();
   }
 
@@ -89,14 +126,24 @@ export class UsersService {
         try {
           const imageUrl = await this.cloudinaryService.uploadImage(file, 'chess-app/users');
           
-          // Assign based on fieldname or filename pattern
-          const fieldName = file.fieldname.toLowerCase();
+          // Determine file type based on fieldname or original filename
+          const fieldName = file.fieldname || file.originalname.toLowerCase();
+          
           if (fieldName.includes('avatar') && !fieldName.includes('frame')) {
             user.avatar_url = imageUrl;
           } else if (fieldName.includes('frame')) {
             user.avatar_frame = imageUrl;
           } else if (fieldName.includes('background')) {
             user.background_image = imageUrl;
+          } else {
+            // Default assignment based on order if fieldname is generic
+            if (!user.avatar_url.includes('cloudinary')) {
+              user.avatar_url = imageUrl;
+            } else if (!user.avatar_frame.includes('cloudinary')) {
+              user.avatar_frame = imageUrl;
+            } else {
+              user.background_image = imageUrl;
+            }
           }
         } catch (error) {
           return api()
@@ -119,6 +166,8 @@ export class UsersService {
       slogan: updatedUser.slogan,
       rank_point: updatedUser.rank_point,
       rank_name: updatedUser.rank_name,
+      coin: updatedUser.coin,
+      updated_at: updatedUser.updated_at,
     };
 
     return api()
@@ -167,20 +216,22 @@ export class UsersService {
       .build();
   }
 
+  async updatePassword(id: string, hashedPassword: string): Promise<void> {
+    await this.userRepository.update(id, { 
+      password: hashedPassword,
+      updated_at: new Date()
+    });
+  }
+
   async findByEmail(email: string): Promise<User | null> {
     return this.userRepository.findOne({ where: { email } });
   }
 
-  async findById(id: number): Promise<User> {
-    const user = await this.userRepository.findOne({ 
-      where: { id: id.toString() } 
-    });
-    if (!user) {
-      throw new NotFoundException(`User with ID ${id} not found`);
-    }
-    return user;
+  async findById(id: string): Promise<User | null> {
+    return this.userRepository.findOne({ where: { id } });
   }
 
+  // Legacy methods for backward compatibility
   findOne(id: number) {
     return `This action returns a #${id} user`;
   }
