@@ -30,6 +30,11 @@ Tạo ra 1 hệ thống để người chơi có thể chơi cờ vua cross-plat
         - God I trở lên: Thắng +60; Thua -60.
     - Chức năng custom Profile: Thay avatar, Viền avatar (Viền avatar sẽ có khi đạt thành tựu hay lên rank trên Rookie), Thay Background, Thay tên người chơi, Thay slogan.
     - Tích hợp thêm AI chơi với người chơi.
+    - Về coin trong game: thắng và thua đều được được coin như sau:
+        - Thắng +(10-50) tuỳ vào số lượt đã đi.
+        - Thua +(1-10) tuỳ vào số lượt đã đi.
+
+
 ## 3. Định hướng thực hiện
 - Frontend: NextJS + MUI + TailwindCSS, chessjs cho quy tắc của các con cờ.
 - Backend: NestJS + Socket.io + TypeORM.
