@@ -37,19 +37,15 @@ export class AuthService {
         token_type: 'Bearer',
         expires_in: '1d',
         user: {
-          id: user.id,
           email: user.email,
           name: user.name,
-          avatar_url: user.avatar_url,
-          rank_name: user.rank_name,
-          rank_point: user.rank_point,
         }
       })
       .build();
   }
 
   async changePassword(userId: string, oldPassword: string, newPassword: string): Promise<ApiResponse> {
-    const user = await this.usersService.findByEmail(''); // Will fix this
+    const user = await this.usersService.findById(userId);
     if (!user) {
       return api().setError('User not found').build();
     }

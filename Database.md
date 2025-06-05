@@ -16,11 +16,10 @@
 - **status**: string (online/offline)
 - **last_active**: timestamp
 - **coin**: number (Game currency, Default: 0)
-- **is_bot**: boolean (Default: false)
 - **created_at**: timestamp
 - **updated_at**: timestamp
 
-## 2. Room (Game room)
+## 2. Rooms (Game room)
 - **id**: UUID - string (Primary Key)
 - **room_code**: string (6 digits, Unique)
 - **room_type**: string (public/private, Default: public)
