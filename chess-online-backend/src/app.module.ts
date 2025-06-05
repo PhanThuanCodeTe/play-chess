@@ -9,6 +9,9 @@ import { getDatabaseConfig } from './common/configs/database.config';
 import { CloudinaryService } from './common/services/cloudinary.service';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { RoomsModule } from './rooms/rooms.module';
+import { GamesModule } from './games/games.module';
+import { AchievementsModule } from './achievements/achievements.module';
 
 @Module({
   imports: [
@@ -21,7 +24,10 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
       inject: [ConfigService],
     }),
     UsersModule,
-    AuthModule
+    AuthModule,
+    RoomsModule,
+    GamesModule,
+    AchievementsModule,
   ],
   controllers: [AppController],
   providers: [
