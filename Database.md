@@ -24,13 +24,11 @@
 - **room_code**: string (6 digits, Unique)
 - **room_type**: string (public/private, Default: public)
 - **status**: string (waiting/queued/in_progress)
-- **time_control**: string (Example: "10+0", "5+3")
+- **time_control**: number (Example: "10", "5") // this is a minute for each player to get a move if out of time player lose and player can set this time control.
 - **max_spectators**: number (Default: 3)
 - **current_spectators**: number (Default: 0)
 - **player1_id**: string (Foreign Key -> users.id, Nullable)
 - **player2_id**: string (Foreign Key -> users.id, Nullable)
-- **created_at**: timestamp
-- **updated_at**: timestamp
 
 ## 3. Games (Game details and results)
 - **id**: UUID - string (Primary Key)
