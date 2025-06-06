@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { RoomType } from './entities/room.entity';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @Controller('rooms')
 @UseGuards(JwtAuthGuard)
@@ -103,6 +104,13 @@ export class RoomsController {
     @Query('limit') limit: number = 20
   ) {
     return this.roomsService.findAll();
+  }
+
+  @Post('create-all-possible-rooms')
+  @ApiOperation({ summary: 'Tạo tất cả các phòng có thể có (00000-99999)' })
+  @ApiResponse({ status: 200, description: 'Tạo thành công tất cả các phòng' })
+  createAllPossibleRooms() {
+    return this.roomsService.createAllPossibleRooms();
   }
 
   // Legacy endpoints (deprecated)

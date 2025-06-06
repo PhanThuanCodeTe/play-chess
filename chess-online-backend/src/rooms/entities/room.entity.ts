@@ -32,9 +32,9 @@ export class Room {
 
   @Column({ 
     type: 'varchar', 
-    length: 6, 
+    length: 5, 
     unique: true,
-    comment: '6-digit room code for display'
+    comment: '5-digit room code for display'
   })
   room_code: string;
 

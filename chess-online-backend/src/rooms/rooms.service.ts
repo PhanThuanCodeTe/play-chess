@@ -332,27 +332,34 @@ export class RoomsService {
   }
 
   /**
-   * Tạo room code 6 chữ số duy nhất
+   * Tạo room code 5 chữ số duy nhất
    */
   private async generateUniqueRoomCode(): Promise<string> {
-    let roomCode: string = '';
-    let exists = true;
+    let roomCode: string = '00000';
+    let isUnique = false;
     let attempts = 0;
     const maxAttempts = 10;
 
-    while (exists && attempts < maxAttempts) {
-      roomCode = Math.floor(100000 + Math.random() * 900000).toString();
-      
+    while (!isUnique && attempts < maxAttempts) {
+      // Tạo số ngẫu nhiên từ 0 đến 99999
+      const randomNum = Math.floor(Math.random() * 100000);
+      // Chuyển thành chuỗi 5 chữ số, thêm số 0 vào đầu nếu cần
+      roomCode = randomNum.toString().padStart(5, '0');
+
+      // Kiểm tra xem mã phòng đã tồn tại chưa
       const existingRoom = await this.roomRepository.findOne({
         where: { room_code: roomCode }
       });
-      
-      exists = !!existingRoom;
-      attempts++;
+
+      if (!existingRoom) {
+        isUnique = true;
+      } else {
+        attempts++;
+      }
     }
 
-    if (exists) {
-      throw new Error('Unable to generate unique room code');
+    if (!isUnique) {
+      throw new BadRequestException('Failed to generate unique room code after multiple attempts');
     }
 
     return roomCode;
@@ -379,6 +386,49 @@ export class RoomsService {
       .where('status = :status', { status: RoomStatus.FINISHED })
       .andWhere('updated_at < :oneHourAgo', { oneHourAgo })
       .execute();
+  }
+
+  /**
+   * Tạo 100000 phòng với mã phòng từ 00000 đến 99999
+   * Chỉ dùng cho mục đích test và debug
+   */
+  async createAllPossibleRooms(): Promise<ApiResponse> {
+    try {
+      const rooms: Room[] = [];
+      for (let i = 0; i < 100000; i++) {
+        const roomCode = i.toString().padStart(5, '0');
+        const room = this.roomRepository.create({
+          room_code: roomCode,
+          room_type: RoomType.PUBLIC,
+          status: RoomStatus.WAITING,
+          time_control: 10,
+          max_spectators: 3,
+          current_spectators: 0
+        });
+        rooms.push(room);
+      }
+
+      // Chia nhỏ để insert từng batch 1000 phòng
+      const batchSize = 1000;
+      for (let i = 0; i < rooms.length; i += batchSize) {
+        const batch = rooms.slice(i, i + batchSize);
+        await this.roomRepository.save(batch);
+      }
+
+      return api()
+        .setMessage('Successfully created all possible rooms')
+        .setResponse({
+          total_rooms: rooms.length,
+          first_room_code: '00000',
+          last_room_code: '99999'
+        })
+        .build();
+
+    } catch (error) {
+      return api()
+        .setError(`Failed to create rooms: ${error.message}`)
+        .build();
+    }
   }
 
   // Legacy methods
