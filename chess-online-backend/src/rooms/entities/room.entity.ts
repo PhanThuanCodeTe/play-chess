@@ -1,41 +1,29 @@
-import { 
-  Entity, 
-  Column, 
-  PrimaryGeneratedColumn, 
-  CreateDateColumn, 
-  UpdateDateColumn,
-  Index,
-  ManyToOne,
-  JoinColumn
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
+
+export enum RoomStatus {
+  WAITING = 'waiting',      // Phòng trống, chưa có ai
+  QUEUED = 'queued',        // Có 1 người, đang chờ người thứ 2
+  IN_PROGRESS = 'in_progress', // Đang chơi
+  FINISHED = 'finished'     // Đã kết thúc
+}
 
 export enum RoomType {
   PUBLIC = 'public',
   PRIVATE = 'private'
 }
 
-export enum RoomStatus {
-  WAITING = 'waiting',    // Phòng trống, chưa có ai
-  QUEUED = 'queued',      // Có 1 người chơi, đang chờ người thứ 2
-  IN_PROGRESS = 'in_progress', // Đang chơi (2 người)
-  FINISHED = 'finished'   // Kết thúc, có thể tái sử dụng
+export enum RoomCreationMode {
+  PRIVATE_ROOM = 'private_room',     // Phòng riêng, chờ bạn bè join
+  MATCHMAKING = 'matchmaking'        // Tìm trận tự động
 }
 
 @Entity('rooms')
-@Index(['status', 'room_type', 'time_control']) // Composite index cho tìm kiếm nhanh
-@Index(['room_code'], { unique: true })
-@Index(['status']) // Single index cho status
 export class Room {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ 
-    type: 'varchar', 
-    length: 5, 
-    unique: true,
-    comment: '5-digit room code for display'
-  })
+  @Column({ unique: true, length: 5 })
   room_code: string;
 
   @Column({
@@ -48,47 +36,34 @@ export class Room {
   @Column({
     type: 'enum',
     enum: RoomStatus,
-    default: RoomStatus.WAITING,
-    comment: 'Room status for quick filtering'
+    default: RoomStatus.WAITING
   })
   status: RoomStatus;
 
   @Column({
-    type: 'int',
-    default: 10,
-    comment: 'Time control in minutes per player'
+    type: 'enum',
+    enum: RoomCreationMode,
+    default: RoomCreationMode.PRIVATE_ROOM,
+    nullable: true
   })
+  creation_mode?: RoomCreationMode;
+
+  @Column({ default: 10 })
   time_control: number;
 
-  @Column({
-    type: 'int',
-    default: 3,
-    comment: 'Maximum number of spectators allowed'
-  })
+  @Column({ default: 3 })
   max_spectators: number;
 
-  @Column({
-    type: 'int',
-    default: 0,
-    comment: 'Current number of spectators'
-  })
+  @Column({ default: 0 })
   current_spectators: number;
 
-  @Column({ 
-    type: 'uuid', 
-    nullable: true,
-    comment: 'First player ID'
-  })
+  // Player relationships
+  @Column({ nullable: true })
   player1_id: string | null;
 
-  @Column({ 
-    type: 'uuid', 
-    nullable: true,
-    comment: 'Second player ID' 
-  })
+  @Column({ nullable: true })
   player2_id: string | null;
 
-  // Relations
   @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'player1_id' })
   player1: User | null;
@@ -97,25 +72,22 @@ export class Room {
   @JoinColumn({ name: 'player2_id' })
   player2: User | null;
 
+  // Timestamps
   @CreateDateColumn()
   created_at: Date;
 
   @UpdateDateColumn()
   updated_at: Date;
 
-  @Column({
-    type: 'timestamp',
-    nullable: true,
-    comment: 'When the game actually started'
-  })
+  @Column({   type: 'timestamptz',  nullable: true })
   game_started_at: Date | null;
 
-  @Column({
-    type: 'timestamp',
-    nullable: true,
-    comment: 'When the game finished'
-  })
+  @Column({   type: 'timestamptz',  nullable: true })
   game_finished_at: Date | null;
+
+  // Metadata for matchmaking
+  @Column({   type: 'text',   nullable: true })
+  matchmaking_metadata: string | null; // JSON string chứa thông tin matchmaking
 
   // Helper methods
   isEmpty(): boolean {
@@ -134,5 +106,13 @@ export class Room {
     if (!this.player1_id) return 'player1';
     if (!this.player2_id) return 'player2';
     return null;
+  }
+
+  isPrivateRoom(): boolean {
+    return this.creation_mode === RoomCreationMode.PRIVATE_ROOM;
+  }
+
+  isMatchmakingRoom(): boolean {
+    return this.creation_mode === RoomCreationMode.MATCHMAKING;
   }
 }

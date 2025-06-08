@@ -1,166 +1,208 @@
+/**
+ * Service quản lý phòng chơi cờ vua
+ * Bao gồm các chức năng:
+ * - Tạo phòng riêng để chờ bạn bè
+ * - Tìm trận đấu tự động (matchmaking)
+ * - Quản lý người chơi trong phòng
+ * - Xử lý các trạng thái phòng
+ */
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindOneOptions } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Room, RoomStatus, RoomType } from './entities/room.entity';
-import { CreateRoomDto } from './dto/create-room.dto';
 import { ApiResponse, api } from '../common/utils/api-respone.util';
+
+/**
+ * Enum định nghĩa các chế độ tạo phòng
+ * - PRIVATE_ROOM: Phòng riêng để chờ bạn bè join
+ * - MATCHMAKING: Phòng tìm trận đấu tự động
+ */
+export enum RoomCreationMode {
+  PRIVATE_ROOM = 'private_room',
+  MATCHMAKING = 'matchmaking'
+}
+
+/**
+ * Interface định nghĩa thông tin người chơi trong hàng đợi matchmaking
+ */
+interface MatchmakingPlayer {
+  userId: string;                    // ID người chơi
+  timeControl: number;              // Thời gian cho mỗi bên (phút)
+  roomType: RoomType;               // Loại phòng (PUBLIC/PRIVATE)
+  timestamp: Date;                  // Thời điểm vào hàng đợi
+  preferences?: {                   // Tùy chọn thêm
+    allowRandomOpponent?: boolean;  // Cho phép đấu với người lạ
+    maxWaitTime?: number;          // Thời gian chờ tối đa (phút)
+  };
+}
 
 @Injectable()
 export class RoomsService {
+  // Map lưu trữ hàng đợi matchmaking
+  private matchmakingQueue: Map<string, MatchmakingPlayer> = new Map();
+
   constructor(
     @InjectRepository(Room)
     private readonly roomRepository: Repository<Room>,
   ) {}
 
   /**
-   * CHIẾN LƯỢC TỐI ƯU CHO VIỆC TÌM PHÒNG NHANH:
-   * 1. Sử dụng composite index trên (status, room_type, time_control)
-   * 2. Tìm phòng WAITING trước (ưu tiên phòng trống)
-   * 3. Nếu không có phòng WAITING, tìm phòng QUEUED
-   * 4. Sử dụng LIMIT 1 và FOR UPDATE để tránh race condition
+   * Tạo phòng riêng để chờ bạn bè join
+   * @param userId ID người tạo phòng
+   * @param timeControl Thời gian cho mỗi bên (phút)
+   * @param roomType Loại phòng (PUBLIC/PRIVATE)
+   * @returns ApiResponse chứa thông tin phòng đã tạo
    */
-
-  /**
-   * Tìm và join vào phòng nhanh nhất
-   * @param userId - ID người chơi
-   * @param timeControl - Thời gian kiểm soát (phút)
-   * @param roomType - Loại phòng (public/private)
-   */
-  async findAndJoinRoom(
-    userId: string, 
-    timeControl: number = 10, 
+  async createPrivateRoom(
+    userId: string,
+    timeControl: number = 10,
     roomType: RoomType = RoomType.PUBLIC
   ): Promise<ApiResponse> {
     try {
-      // Bước 1: Tìm phòng WAITING (ưu tiên cao nhất - phòng trống)
-      let room = await this.roomRepository
+      // Tìm phòng trống (WAITING và không có người chơi)
+      const emptyRoom = await this.roomRepository
         .createQueryBuilder('room')
         .where('room.status = :status', { status: RoomStatus.WAITING })
-        .andWhere('room.room_type = :roomType', { roomType })
-        .andWhere('room.time_control = :timeControl', { timeControl })
-        .orderBy('room.created_at', 'ASC') // FIFO
+        .andWhere('room.player1_id IS NULL')
+        .andWhere('room.player2_id IS NULL')
         .limit(1)
         .getOne();
 
-      if (room) {
-        // Có phòng trống, join vào làm player1
-        room.player1_id = userId;
-        room.status = RoomStatus.QUEUED;
-        room.updated_at = new Date();
-        
-        const updatedRoom = await this.roomRepository.save(room);
-        
+      if (!emptyRoom) {
         return api()
-          .setMessage('Joined empty room successfully')
-          .setResponse({
-            room_id: updatedRoom.id,
-            room_code: updatedRoom.room_code,
-            status: updatedRoom.status,
-            player_slot: 'player1',
-            time_control: updatedRoom.time_control,
-            waiting_for_opponent: true
-          })
+          .setError('No available rooms. Please try again later.')
           .build();
       }
 
-      // Bước 2: Tìm phòng QUEUED (có 1 người chơi)
-      room = await this.roomRepository
-        .createQueryBuilder('room')
-        .where('room.status = :status', { status: RoomStatus.QUEUED })
-        .andWhere('room.room_type = :roomType', { roomType })
-        .andWhere('room.time_control = :timeControl', { timeControl })
-        .andWhere('(room.player1_id != :userId OR room.player2_id != :userId)', { userId }) // Không join phòng của chính mình
-        .orderBy('room.created_at', 'ASC') // FIFO
-        .limit(1)
-        .getOne();
+      // Cập nhật thông tin phòng
+      emptyRoom.player1_id = userId;
+      emptyRoom.status = RoomStatus.QUEUED;
+      emptyRoom.time_control = timeControl;
+      emptyRoom.room_type = roomType;
+      emptyRoom.updated_at = new Date();
+      emptyRoom.creation_mode = RoomCreationMode.PRIVATE_ROOM;
 
-      if (room) {
-        // Có phòng đang chờ, join vào làm player2
-        const playerSlot = room.getAvailablePlayerSlot();
-        
-        if (playerSlot === 'player1') {
-          room.player1_id = userId;
-        } else if (playerSlot === 'player2') {
-          room.player2_id = userId;
-        }
-        
-        room.status = RoomStatus.IN_PROGRESS;
-        room.game_started_at = new Date();
-        room.updated_at = new Date();
-        
-        const updatedRoom = await this.roomRepository.save(room);
-        
-        return api()
-          .setMessage('Joined room and game started')
-          .setResponse({
-            room_id: updatedRoom.id,
-            room_code: updatedRoom.room_code,
-            status: updatedRoom.status,
-            player_slot: playerSlot,
-            time_control: updatedRoom.time_control,
-            game_started: true,
-            opponent_id: playerSlot === 'player1' ? room.player2_id : room.player1_id
-          })
-          .build();
-      }
-
-      // Bước 3: Không tìm thấy phòng phù hợp, tạo phòng mới
-      const newRoom = await this.createNewRoom(userId, timeControl, roomType);
-      return newRoom;
-
-    } catch (error) {
-      return api()
-        .setError(`Failed to find room: ${error.message}`)
-        .build();
-    }
-  }
-
-  /**
-   * Tạo phòng mới
-   */
-  async createNewRoom(
-    userId: string, 
-    timeControl: number = 10, 
-    roomType: RoomType = RoomType.PUBLIC
-  ): Promise<ApiResponse> {
-    try {
-      const roomCode = await this.generateUniqueRoomCode();
-      
-      const room = this.roomRepository.create({
-        room_code: roomCode,
-        room_type: roomType,
-        status: RoomStatus.QUEUED,
-        time_control: timeControl,
-        player1_id: userId,
-        max_spectators: 3,
-        current_spectators: 0
-      });
-
-      const savedRoom = await this.roomRepository.save(room);
+      const savedRoom = await this.roomRepository.save(emptyRoom);
 
       return api()
-        .setMessage('New room created successfully')
+        .setMessage('Private room created successfully')
         .setResponse({
           room_id: savedRoom.id,
           room_code: savedRoom.room_code,
           status: savedRoom.status,
           player_slot: 'player1',
           time_control: savedRoom.time_control,
-          waiting_for_opponent: true
+          room_type: 'private',
+          waiting_for_friend: true,
+          share_code: savedRoom.room_code
         })
         .build();
 
     } catch (error) {
       return api()
-        .setError(`Failed to create room: ${error.message}`)
+        .setError(`Failed to create private room: ${error.message}`)
         .build();
     }
   }
 
   /**
-   * Join phòng theo room_code
+   * Bắt đầu tìm trận đấu tự động
+   * @param userId ID người chơi
+   * @param timeControl Thời gian cho mỗi bên (phút)
+   * @param roomType Loại phòng
+   * @param options Tùy chọn thêm
+   * @returns ApiResponse chứa trạng thái matchmaking
    */
-  async joinRoomByCode(userId: string, roomCode: string): Promise<ApiResponse> {
+  async startMatchmaking(
+    userId: string,
+    timeControl: number = 10,
+    roomType: RoomType = RoomType.PUBLIC,
+    options?: {
+      allowRandomOpponent?: boolean;
+      maxWaitTime?: number;
+    }
+  ): Promise<ApiResponse> {
+    try {
+      // Kiểm tra người chơi đã trong hàng đợi chưa
+      if (this.matchmakingQueue.has(userId)) {
+        return api()
+          .setError('You are already in matchmaking queue')
+          .build();
+      }
+
+      // Tìm đối thủ phù hợp trong hàng đợi
+      const matchedPlayer = this.findMatchInQueue(timeControl, roomType, userId);
+
+      if (matchedPlayer) {
+        // Tạo trận đấu nếu tìm thấy đối thủ
+        const gameRoom = await this.createMatchmakingGame(
+          userId, 
+          matchedPlayer.userId, 
+          timeControl, 
+          roomType
+        );
+        
+        // Xóa cả 2 người chơi khỏi hàng đợi
+        this.matchmakingQueue.delete(userId);
+        this.matchmakingQueue.delete(matchedPlayer.userId);
+
+        return gameRoom;
+      }
+
+      // Thêm vào hàng đợi nếu chưa tìm thấy đối thủ
+      this.matchmakingQueue.set(userId, {
+        userId,
+        timeControl,
+        roomType,
+        timestamp: new Date(),
+        preferences: options
+      });
+
+      // Bắt đầu đếm thời gian chờ
+      this.startMatchmakingTimeout(userId, options?.maxWaitTime || 60);
+
+      return api()
+        .setMessage('Added to matchmaking queue')
+        .setResponse({
+          status: 'searching',
+          estimated_wait_time: '30-60 seconds',
+          queue_position: this.matchmakingQueue.size,
+          can_cancel: true
+        })
+        .build();
+
+    } catch (error) {
+      return api()
+        .setError(`Matchmaking failed: ${error.message}`)
+        .build();
+    }
+  }
+
+  /**
+   * Hủy tìm trận đấu
+   * @param userId ID người chơi
+   * @returns ApiResponse thông báo kết quả
+   */
+  async cancelMatchmaking(userId: string): Promise<ApiResponse> {
+    if (this.matchmakingQueue.has(userId)) {
+      this.matchmakingQueue.delete(userId);
+      return api()
+        .setMessage('Matchmaking cancelled')
+        .build();
+    }
+
+    return api()
+      .setError('You are not in matchmaking queue')
+      .build();
+  }
+
+  /**
+   * Tham gia phòng riêng bằng mã phòng
+   * @param userId ID người chơi
+   * @param roomCode Mã phòng
+   * @returns ApiResponse thông tin phòng sau khi tham gia
+   */
+  async joinPrivateRoom(userId: string, roomCode: string): Promise<ApiResponse> {
     try {
       const room = await this.roomRepository.findOne({
         where: { room_code: roomCode }
@@ -168,63 +210,46 @@ export class RoomsService {
 
       if (!room) {
         return api()
-          .setError('Room not found')
+          .setError('No room matched your search')
           .build();
       }
 
-      if (room.status === RoomStatus.IN_PROGRESS) {
+      // Kiểm tra điều kiện tham gia
+      if (room.status !== RoomStatus.QUEUED || room.creation_mode !== RoomCreationMode.PRIVATE_ROOM) {
         return api()
-          .setError('Room is full')
+          .setError('Room is not available for joining')
           .build();
       }
 
-      if (room.status === RoomStatus.FINISHED) {
-        return api()
-          .setError('Room has finished')
-          .build();
-      }
-
-      // Kiểm tra xem user đã ở trong phòng chưa
-      if (room.player1_id === userId || room.player2_id === userId) {
+      if (room.player1_id === userId) {
         return api()
           .setError('You are already in this room')
           .build();
       }
 
-      const playerSlot = room.getAvailablePlayerSlot();
-      if (!playerSlot) {
+      if (room.player2_id) {
         return api()
           .setError('Room is full')
           .build();
       }
 
-      // Join vào phòng
-      if (playerSlot === 'player1') {
-        room.player1_id = userId;
-      } else {
-        room.player2_id = userId;
-      }
-
-      // Cập nhật status
-      if (room.isEmpty()) {
-        room.status = RoomStatus.QUEUED;
-      } else if (room.isFull()) {
-        room.status = RoomStatus.IN_PROGRESS;
-        room.game_started_at = new Date();
-      }
-
+      // Cập nhật thông tin phòng
+      room.player2_id = userId;
+      room.status = RoomStatus.IN_PROGRESS;
+      room.game_started_at = new Date();
       room.updated_at = new Date();
+
       const updatedRoom = await this.roomRepository.save(room);
 
       return api()
-        .setMessage('Joined room successfully')
+        .setMessage('Joined private room successfully')
         .setResponse({
           room_id: updatedRoom.id,
           room_code: updatedRoom.room_code,
           status: updatedRoom.status,
-          player_slot: playerSlot,
-          time_control: updatedRoom.time_control,
-          game_started: updatedRoom.status === RoomStatus.IN_PROGRESS
+          player_slot: 'player2',
+          game_started: true,
+          opponent_id: room.player1_id
         })
         .build();
 
@@ -236,7 +261,125 @@ export class RoomsService {
   }
 
   /**
-   * Rời phòng
+   * Tìm đối thủ phù hợp trong hàng đợi
+   * @param timeControl Thời gian cho mỗi bên
+   * @param roomType Loại phòng
+   * @param excludeUserId ID người chơi cần loại trừ
+   * @returns MatchmakingPlayer hoặc null
+   */
+  private findMatchInQueue(
+    timeControl: number, 
+    roomType: RoomType, 
+    excludeUserId: string
+  ): MatchmakingPlayer | null {
+    for (const [userId, player] of this.matchmakingQueue) {
+      if (userId !== excludeUserId && 
+          player.timeControl === timeControl && 
+          player.roomType === roomType) {
+        return player;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Tạo trận đấu cho 2 người chơi từ matchmaking
+   * @param player1Id ID người chơi 1
+   * @param player2Id ID người chơi 2
+   * @param timeControl Thời gian cho mỗi bên
+   * @param roomType Loại phòng
+   * @returns ApiResponse thông tin trận đấu
+   */
+  private async createMatchmakingGame(
+    player1Id: string,
+    player2Id: string,
+    timeControl: number,
+    roomType: RoomType
+  ): Promise<ApiResponse> {
+    // Tìm phòng trống
+    const emptyRoom = await this.roomRepository
+      .createQueryBuilder('room')
+      .where('room.status = :status', { status: RoomStatus.WAITING })
+      .andWhere('room.player1_id IS NULL')
+      .andWhere('room.player2_id IS NULL')
+      .limit(1)
+      .getOne();
+
+    if (!emptyRoom) {
+      throw new Error('No available rooms for matchmaking');
+    }
+
+    // Thiết lập thông tin trận đấu
+    emptyRoom.player1_id = player1Id;
+    emptyRoom.player2_id = player2Id;
+    emptyRoom.status = RoomStatus.IN_PROGRESS;
+    emptyRoom.time_control = timeControl;
+    emptyRoom.room_type = roomType;
+    emptyRoom.creation_mode = RoomCreationMode.MATCHMAKING;
+    emptyRoom.game_started_at = new Date();
+    emptyRoom.updated_at = new Date();
+
+    const gameRoom = await this.roomRepository.save(emptyRoom);
+
+    return api()
+      .setMessage('Match found! Game started')
+      .setResponse({
+        room_id: gameRoom.id,
+        room_code: gameRoom.room_code,
+        status: gameRoom.status,
+        time_control: gameRoom.time_control,
+        game_started: true,
+        match_type: 'ranked_match'
+      })
+      .build();
+  }
+
+  /**
+   * Xử lý timeout khi tìm trận
+   * @param userId ID người chơi
+   * @param maxWaitTime Thời gian chờ tối đa (giây)
+   */
+  private startMatchmakingTimeout(userId: string, maxWaitTime: number) {
+    setTimeout(async () => {
+      const player = this.matchmakingQueue.get(userId);
+      if (player) {
+        // Xử lý khi hết thời gian chờ
+        this.matchmakingQueue.delete(userId);
+        
+        // TODO: Thêm xử lý khi timeout
+        // 1. Ghép với AI
+        // 2. Mở rộng điều kiện tìm kiếm
+        // 3. Thông báo và hủy
+      }
+    }, maxWaitTime * 1000);
+  }
+
+  /**
+   * Lấy trạng thái hàng đợi matchmaking (cho mục đích debug)
+   * @returns ApiResponse chứa thông tin hàng đợi
+   */
+  async getMatchmakingStatus(): Promise<ApiResponse> {
+    const queueData = Array.from(this.matchmakingQueue.values()).map(player => ({
+      userId: player.userId.substring(0, 8) + '...',
+      timeControl: player.timeControl,
+      roomType: player.roomType,
+      waitTime: Math.floor((Date.now() - player.timestamp.getTime()) / 1000)
+    }));
+
+    return api()
+      .setMessage('Matchmaking queue status')
+      .setResponse({
+        total_players: this.matchmakingQueue.size,
+        queue: queueData
+      })
+      .build();
+  }
+
+  /**
+   * Rời khỏi phòng
+   * @param userId ID người chơi
+   * @param roomId ID phòng
+   * @returns ApiResponse thông báo kết quả
    */
   async leaveRoom(userId: string, roomId: string): Promise<ApiResponse> {
     try {
@@ -250,7 +393,7 @@ export class RoomsService {
           .build();
       }
 
-      // Xóa player khỏi phòng
+      // Xóa người chơi khỏi phòng
       if (room.player1_id === userId) {
         room.player1_id = null;
       } else if (room.player2_id === userId) {
@@ -261,7 +404,7 @@ export class RoomsService {
           .build();
       }
 
-      // Cập nhật status
+      // Cập nhật trạng thái phòng
       if (room.isEmpty()) {
         room.status = RoomStatus.WAITING;
       } else if (room.hasOnePlayer()) {
@@ -284,7 +427,9 @@ export class RoomsService {
   }
 
   /**
-   * Lấy thông tin phòng
+   * Lấy thông tin chi tiết của phòng
+   * @param roomId ID phòng
+   * @returns ApiResponse chứa thông tin phòng
    */
   async getRoomInfo(roomId: string): Promise<ApiResponse> {
     try {
@@ -332,7 +477,8 @@ export class RoomsService {
   }
 
   /**
-   * Tạo room code 5 chữ số duy nhất
+   * Tạo mã phòng 5 chữ số duy nhất
+   * @returns string Mã phòng
    */
   private async generateUniqueRoomCode(): Promise<string> {
     let roomCode: string = '00000';
@@ -341,12 +487,9 @@ export class RoomsService {
     const maxAttempts = 10;
 
     while (!isUnique && attempts < maxAttempts) {
-      // Tạo số ngẫu nhiên từ 0 đến 99999
       const randomNum = Math.floor(Math.random() * 100000);
-      // Chuyển thành chuỗi 5 chữ số, thêm số 0 vào đầu nếu cần
       roomCode = randomNum.toString().padStart(5, '0');
 
-      // Kiểm tra xem mã phòng đã tồn tại chưa
       const existingRoom = await this.roomRepository.findOne({
         where: { room_code: roomCode }
       });
@@ -366,7 +509,8 @@ export class RoomsService {
   }
 
   /**
-   * Dọn dẹp phòng cũ (chạy định kỳ)
+   * Dọn dẹp các phòng cũ (chạy định kỳ)
+   * Reset các phòng đã kết thúc sau 1 giờ
    */
   async cleanupOldRooms(): Promise<void> {
     const oneHourAgo = new Date();
@@ -389,8 +533,9 @@ export class RoomsService {
   }
 
   /**
-   * Tạo 100000 phòng với mã phòng từ 00000 đến 99999
+   * Tạo tất cả các phòng có thể (00000-99999)
    * Chỉ dùng cho mục đích test và debug
+   * @returns ApiResponse thông báo kết quả
    */
   async createAllPossibleRooms(): Promise<ApiResponse> {
     try {
@@ -408,7 +553,7 @@ export class RoomsService {
         rooms.push(room);
       }
 
-      // Chia nhỏ để insert từng batch 1000 phòng
+      // Lưu theo batch để tối ưu hiệu suất
       const batchSize = 1000;
       for (let i = 0; i < rooms.length; i += batchSize) {
         const batch = rooms.slice(i, i + batchSize);
@@ -429,29 +574,5 @@ export class RoomsService {
         .setError(`Failed to create rooms: ${error.message}`)
         .build();
     }
-  }
-
-  // Legacy methods
-  create(createRoomDto: CreateRoomDto) {
-    return 'Use createNewRoom() instead';
-  }
-
-  findAll() {
-    return this.roomRepository.find({
-      take: 20,
-      order: { created_at: 'DESC' }
-    });
-  }
-
-  findOne(id: number) {
-    return `This action returns a #${id} room`;
-  }
-
-  update(id: number, updateRoomDto: any) {
-    return `This action updates a #${id} room`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} room`;
   }
 }

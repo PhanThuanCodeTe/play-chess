@@ -17,13 +17,17 @@ import { FilesInterceptor } from '@nestjs/platform-express';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from './entities/user.entity';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
+@ApiTags('Users')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Public() // Đăng ký không cần authentication
   @Post('register')
+  @ApiOperation({ summary: 'Tạo người dùng' })
+  @ApiResponse({ status: 201, description: 'Người dùng đã được tạo.' })
   create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.createUser(createUserDto);
   }
